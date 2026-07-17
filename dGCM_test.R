@@ -58,60 +58,55 @@ dgcm_test <- function(x_on_z_resid, y_on_z_resid, lw_candidates, mv_se_param,
   }
 
 
-  # univariate case
-  if (d_x == 1 && d_y == 1) {
-    resid_prod <- x_on_z_resid * y_on_z_resid
-    lw <- mv_method(resid_prod, n, lw_candidates, mv_se_param)
-    cumul_var_hat <- estimate_cumul_var(r = resid_prod, lw = lw, n = n)
-    s_hat_vec <- rep(NA, nsim)
-    TnL <- n - lw + 1
-    for (sim in 1:nsim) {    
-      # gaussian partial sum process
-      g_psum_proc <- rep(NA, n)
-      g_psum_t <- 0
-      # no estimate for 1:(lw-1)
-      for (t in lw:n) {
-        if (t == lw) {
-          sigma2_hat_t <- cumul_var_hat[t]
-        } else {
-          sigma2_hat_t <- cumul_var_hat[t] - cumul_var_hat[t - 1]
-        }
-        g_psum_t <- g_psum_t + rnorm(mean = 0, sd = sqrt(sigma2_hat_t), n = 1)
-        g_psum_proc[t] <- g_psum_t
+  resid_prod <- x_on_z_resid * y_on_z_resid
+  lw <- mv_method(resid_prod, n, lw_candidates, mv_se_param)
+  cumul_var_hat <- estimate_cumul_var(r = resid_prod, lw = lw, n = n)
+  s_hat_vec <- rep(NA, nsim)
+  TnL <- n - lw + 1
+  for (sim in 1:nsim) {    
+    # gaussian partial sum process
+    g_psum_proc <- rep(NA, n)
+    g_psum_t <- 0
+    # no estimate for 1:(lw-1)
+    for (t in lw:n) {
+      if (t == lw) {
+        sigma2_hat_t <- cumul_var_hat[t]
+      } else {
+        sigma2_hat_t <- cumul_var_hat[t] - cumul_var_hat[t - 1]
       }
-      
-      s_hat <- max(abs(g_psum_proc[lw:n])) / sqrt(TnL)
-      s_hat_vec[sim] <- s_hat
+      g_psum_t <- g_psum_t + rnorm(mean = 0, sd = sqrt(sigma2_hat_t), n = 1)
+      g_psum_proc[t] <- g_psum_t
     }
-
-    boot_quantile <- quantile(s_hat_vec, probs = (1 - alpha))
-    max_abs_partial_sum <- max(abs(cumsum(resid_prod[lw:n,1])))
-    test_stat <- max_abs_partial_sum / sqrt(TnL)
-
-    p_value <- (sum(s_hat_vec >= test_stat) + 1) / (nsim + 1)
-    reject <- test_stat > boot_quantile
-    if (plot.residuals) {
-      png(paste0(fp, "dgcm_absNormCumsumResid.png"), width = 800, height = 600)
-      plot(lw:n, abs((cumsum(resid_prod[lw:n,1]))) / sqrt(TnL),
-           xlab = "Index",
-           ylab = "Normalized Absolute Value of Cumulative Sum of Residual Products",
-           main = "Normalized Absolute Value of Cumulative Sum of Residual Products")
-      abline(h = boot_quantile, col = "red")
-      dev.off()
-    }
-    return(list(p_value = p_value,
-                test_stat = test_stat,
-                reject = reject,
-                max_abs_partial_sum = max_abs_partial_sum,
-                n = n,
-                boot_quantile = boot_quantile,
-                lw = lw,
-                lw_candidates = lw_candidates,
-                mv_se_param = mv_se_param,
-                nsim = nsim))
-  } else {
-    stop("Multivariate case is not implemented in this function")
+    
+    s_hat <- max(abs(g_psum_proc[lw:n])) / sqrt(TnL)
+    s_hat_vec[sim] <- s_hat
   }
+
+  boot_quantile <- quantile(s_hat_vec, probs = (1 - alpha))
+  max_abs_partial_sum <- max(abs(cumsum(resid_prod[lw:n,1])))
+  test_stat <- max_abs_partial_sum / sqrt(TnL)
+
+  p_value <- (sum(s_hat_vec >= test_stat) + 1) / (nsim + 1)
+  reject <- test_stat > boot_quantile
+  if (plot.residuals) {
+    png(paste0(fp, "dgcm_absNormCumsumResid.png"), width = 800, height = 600)
+    plot(lw:n, abs((cumsum(resid_prod[lw:n,1]))) / sqrt(TnL),
+         xlab = "Index",
+         ylab = "Normalized Absolute Value of Cumulative Sum of Residual Products",
+         main = "Normalized Absolute Value of Cumulative Sum of Residual Products")
+    abline(h = boot_quantile, col = "red")
+    dev.off()
+  }
+  return(list(p_value = p_value,
+              test_stat = test_stat,
+              reject = reject,
+              max_abs_partial_sum = max_abs_partial_sum,
+              n = n,
+              boot_quantile = boot_quantile,
+              lw = lw,
+              lw_candidates = lw_candidates,
+              mv_se_param = mv_se_param,
+              nsim = nsim))
 }
 
 mv_method <- function(resid_prod, n, lw_candidates, mv_se_param) {
