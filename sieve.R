@@ -1,10 +1,3 @@
-#' "Conditional Independence Testing with a Single Realization of a Multivariate Nonstationary Nonlinear Time Series"
-#' Submitted to the Journal of Business and Economic Statistics, 2025
-#' 
-#' Original code for the sieve model is from the SIMle R package from:
-#' "Simultaneous Sieve Inference for Time-Inhomogeneous Nonlinear Time Series Regression."
-#' https://arxiv.org/pdf/2112.08545.pdf
-#' 
 #' functions esti_ts(), general_esti(), esti_beta() are adapted from the SIMle R package.
 #' Purpose: original code for sieve estimator is for the autoregressive case only.
 #'          We changed the original code to allow for general covariates.
@@ -16,6 +9,10 @@
 #'          regression function at the last time.
 #' User-specified estimation of nonlinear time series regression
 #' @description This function estimates nonlinear time series regression
+#'
+#' Original code for the sieve model is from the SIMle R package from:
+#' "Simultaneous Sieve Inference for Time-Inhomogeneous Nonlinear Time Series Regression."
+#' https://arxiv.org/pdf/2112.08545.pdf
 #'
 #' @param x (dataframe) regressors with relevant lags already included
 #' @param y (vector) regressand
