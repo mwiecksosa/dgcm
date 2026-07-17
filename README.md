@@ -4,4 +4,4 @@
   Implements the dynamic generalized covariance measure (dGCM) test.
 
 - **`sieve.R`**  
-  Implements sieve estimation of the time-varying regression functions.
+  Implements sieve estimator for the time-varying regression functions.
