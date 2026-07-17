@@ -1,0 +1,381 @@
+# Real data application
+
+# Set paths
+```{r}
+dev_path <- # set path
+data_path <- # set path
+source(paste0(dev_path, "dGCM_test.R"))
+source(paste0(dev_path, "sieve.R"))
+```
+
+# Load required packages
+```{r}
+# Load required packages
+if (!require("quantmod")) install.packages("quantmod")
+if (!require("dplyr")) install.packages("dplyr")
+if (!require("reshape2")) install.packages("reshape2")
+library(quantmod) # for getSymbols
+library(dplyr) # for mutate
+library(reshape2) # for melt
+library(ggplot2)
+library(zoo)
+library(rlist)
+library(knitr)
+```
+
+# Get data (or just load the provided data and move to the data analysis)
+```{r}
+# Define ticker symbols and names
+# Market indices
+index_tickers <- c("^GSPC", "^FTSE", "^HSI", "^N225")
+index_names <- c("SP500", "FTSE100", "HangSeng", "Nikkei225")
+
+
+# Define date range - daily returns for 2022-2025
+start_date <- as.Date("2022-01-01")
+end_date <- as.Date("2025-03-31")
+
+# Function to download data and calculate daily returns
+get_daily_returns <- function(ticker, asset_name) {
+  # Try to download the data
+  tryCatch({
+    # Get data from Yahoo Finance
+    asset_data <- getSymbols(ticker, src = "yahoo", 
+                           from = start_date, 
+                           to = end_date, 
+                           auto.assign = FALSE)
+    
+    # Extract closing prices (Adjusted for indices)
+    
+    # For indices, use the Adjusted Close price (6th column)
+    close_prices <- asset_data[, 6]
+    
+    colnames(close_prices) <- asset_name
+    
+    # Calculate log returns directly on daily data
+    daily_returns <- diff(log(close_prices), lag = 1)
+    
+    # Replace NA with NA (just to make the first value NA, to be interpolated later)
+    # The diff() function already creates an NA for the first value
+    
+    return(daily_returns)
+  }, error = function(e) {
+    message(paste("Error downloading data for", asset_name, ":", e$message))
+    return(NULL)
+  })
+}
+
+# Get daily returns for indices
+index_returns_list <- list()
+for (i in 1:length(index_tickers)) {
+  index_returns_list[[index_names[i]]] <- get_daily_returns(index_tickers[i], index_names[i])
+}
+
+# Combine all returns into a single list
+all_returns_list <- c(index_returns_list)
+
+# Merge all returns into a single xts object
+all_returns_xts <- do.call(merge, all_returns_list)
+
+# Instead of removing NAs, use linear interpolation
+# First create a complete date sequence to ensure all days are included
+date_seq <- seq(min(index(all_returns_xts)), max(index(all_returns_xts)), by="day")
+empty_xts <- xts(order.by=date_seq)
+
+# Merge with empty time series to ensure all dates exist
+all_returns_xts <- merge(all_returns_xts, empty_xts)
+
+# Use linear interpolation for missing values
+all_returns_xts_interp <- na.approx(all_returns_xts, na.rm=FALSE)
+
+# For any remaining NAs at the start or end, use the next/previous value
+all_returns_xts_interp <- na.locf(all_returns_xts_interp, fromLast = TRUE)
+all_returns_xts_interp <- na.locf(all_returns_xts_interp)
+
+# Check if there are still any NAs
+any_na <- any(is.na(all_returns_xts_interp))
+if(any_na) {
+  cat("Warning: There are still some NA values in the dataset after interpolation.\n")
+  # Replace any remaining NAs with zeros (this should be rare)
+  all_returns_xts_interp[is.na(all_returns_xts_interp)] <- 0
+}
+
+# Convert xts object to dataframe with date column
+all_returns <- data.frame(Date = index(all_returns_xts_interp), coredata(all_returns_xts_interp))
+
+# Create visualizations with ggplot2
+# Reshape data for plotting
+indices_data <- melt(all_returns[, c("Date", index_names)], 
+                    id.vars = "Date", variable.name = "Index", value.name = "Return")
+
+all_returns <- all_returns %>% mutate(
+    SP500_lag1 = lag(SP500),
+    HangSeng_lag1 = lag(HangSeng),
+    Nikkei225_lag1 = lag(Nikkei225),
+    FTSE100_lag1 = lag(FTSE100)
+  )
+all_returns <- all_returns[-1,]
+
+all_returns$const <- 1
+
+all_returns$isWeekend <- weekdays(all_returns$Date) %in% c("Saturday", "Sunday")
+df_all_returns <- all_returns[!all_returns$isWeekend,]
+df_all_returns <- df_all_returns %>% select(-isWeekend)
+
+# Save the final dataframe and all analysis data as RDS files
+saveRDS(df_all_returns, paste0(data_path,"returns.rds")) # or save as csv with write.csv()
+```
+
+# Data analysis
+```{r}
+df <- readRDS(paste0(data_path,"returns.rds")) # or read csv with read.csv()
+```
+
+```{r}
+# set seed for reproducibility
+set.seed(2025) 
+
+# Create a dataframe with columns X, Y, Z in the same order as the p-value variables
+xyz_df <- data.frame(
+  X = c(
+    "SP500", "SP500", "SP500", "FTSE100", "FTSE100", "HangSeng",
+    "SP500", "SP500", "SP500", "SP500", "SP500", "SP500",
+    "FTSE100", "FTSE100", "FTSE100", "FTSE100", "HangSeng", "HangSeng",
+    "FTSE100", "FTSE100", "Nikkei225", "FTSE100", "Nikkei225", "HangSeng"
+  ),
+  Y = c(
+    "FTSE100", "HangSeng", "Nikkei225", "HangSeng", "Nikkei225", "Nikkei225",
+    "FTSE100", "FTSE100", "HangSeng", "HangSeng", "Nikkei225", "Nikkei225",
+    "HangSeng", "HangSeng", "Nikkei225", "Nikkei225", "Nikkei225", "Nikkei225",
+    "Nikkei225", "HangSeng", "HangSeng", "SP500_lag1", "SP500_lag1", "SP500_lag1"
+  ),
+  Z = c(
+    "const", "const", "const", "const", "const", "const",
+    "HangSeng", "Nikkei225", "FTSE100", "Nikkei225", "FTSE100", "HangSeng",
+    "SP500", "Nikkei225", "SP500", "HangSeng", "SP500", "FTSE100",
+    "SP500_lag1", "SP500_lag1", "SP500_lag1", "const", "const", "const"
+  ),
+  stringsAsFactors = FALSE
+)
+
+# for minimum volatility method for selecting lag window for cov estimation
+# lag window candidates to consider
+n_sample <- nrow(df)
+mv_seq_by <- 1 # consider contiguous lag window sizes, increments of 1
+mv_num_neighbors <- 12 # for calculation of volatility criterion
+power_lw <- 3 / 4 # power for largest candidate lag window size
+lw_candidates <- seq(1, max(1, floor(n_sample^power_lw)), mv_seq_by)
+
+# number of simulations for the Gaussian process for estimating quantile
+n_boot <- 4999
+
+
+# for sieve estimator grid (z,u)
+n_esti <- 250
+
+# significance level
+alpha <- 0.05
+
+# subsampling buffer for cross-validation
+cv_buffer <- 1
+
+
+
+for (i in 1:nrow(xyz_df)) {
+    # SP500, FTSE100, HangSeng, Nikkei225
+    # SP500_lag1
+    # const
+    x_name <- xyz_df$X[i] # name of X time series
+    y_name <- xyz_df$Y[i] # name of Y time series
+    z_name <- xyz_df$Z[i] # name of Z time series
+
+    print(paste("i",i,"/",nrow(xyz_df)))
+    print(paste("x_name",x_name))
+    print(paste("y_name",y_name))
+    print(paste("z_name",z_name))
+
+
+    # grid of numbers of basis functions for the sieve estimator
+    c_vec <- seq(2, 10, 2) # for time
+    if(z_name == "const") {
+      d_vec <- c(1) # for indep test
+    } else {
+      d_vec <- seq(2, 10, 2) # for covariate
+    }
+
+    cv_res_x <- cv_skip_sampling(regressors = data.frame(df[, z_name]), # nolint
+                                regressand = df[, x_name],
+                                c_vec = c_vec, d_vec = d_vec, b_time = "Legen",
+                                b_timese = "Legen", mp_type = "algeb",
+                                cv_buffer = cv_buffer,
+                                s = 1, n_esti = n_esti)
+    c_sieve_x <- cv_res_x$c_min_mse
+    d_sieve_x <- cv_res_x$d_min_mse
+
+    x_fitted <- esti_ts(regressors = data.frame(df[, z_name]), # nolint
+                        regressand = df[, x_name],
+                        c = c_sieve_x, d = d_sieve_x,
+                        b_time = "Legen", b_timese = "Legen",
+                        mp_type = "algeb", s = 1, n_esti = n_esti)
+
+    cv_res_y <- cv_skip_sampling(regressors = data.frame(df[, z_name]), # nolint
+                                regressand = df[, y_name],
+                                c_vec = c_vec, d_vec = d_vec,
+                                b_time = "Legen", b_timese = "Legen",
+                                mp_type = "algeb", cv_buffer = cv_buffer,
+                                s = 1, n_esti = n_esti)
+
+    c_sieve_y <- cv_res_y$c_min_mse
+    d_sieve_y <- cv_res_y$d_min_mse
+
+    y_fitted <- esti_ts(regressors = data.frame(df[, z_name]), # nolint
+                        regressand = df[, y_name],
+                        c = c_sieve_y, d = d_sieve_y,
+                        b_time = "Legen", b_timese = "Legen",
+                        mp_type = "algeb", s = 1, n_esti = n_esti)
+    x_resid <- df[, x_name] - x_fitted
+    y_resid <- df[, y_name] - y_fitted
+
+
+    res <- dgcm_test(x_on_z_resid = x_resid, # nolint
+                        y_on_z_resid = y_resid,
+                        lw_candidates = lw_candidates, mv_se_param = mv_num_neighbors, fp = data_path,
+                        alpha = alpha, nsim = n_boot,
+                        plot.residuals = FALSE)
+
+
+
+    res["c_sieve_x"] <- c_sieve_x
+    res["d_sieve_x"] <- d_sieve_x
+    res["c_sieve_y"] <- c_sieve_y
+    res["d_sieve_y"] <- d_sieve_y
+
+    # Save the list as an RData file
+    list.save(res, file = paste0(data_path, "res_stock_application","_x_",x_name,"_y_",y_name,"_z_",z_name,".RData"))
+
+
+    # Set threshold or reference level
+    threshold <- res$boot_quantile
+    test_res <- data.frame(index = seq(n_sample), psum_proc = abs((cumsum(x_resid * y_resid))) / sqrt(n_sample))
+    # Plot
+    pres <- ggplot(test_res, aes(x = index, y = psum_proc)) +
+    geom_line(color = "blue") +  # Time series line
+    geom_hline(yintercept = threshold, color = "red", linetype = "dashed", linewidth = 1) +
+    theme_minimal() +
+    labs(title = "Partial Sum Process and Quantile",
+        y = "Value", x = "Time")
+
+    ggsave(paste0(data_path,"dgcm_test_res_stock_application","_x_",x_name,"_y_",y_name,"_z_",z_name,".pdf"), plot = pres, width = 8, height = 6, dpi = 300)
+}
+```
+
+# Format results for table
+```{r}
+pval_res_stock_application_x_SP500_y_FTSE100_z_const <- list.load(paste0(data_path, "res_stock_application_x_SP500_y_FTSE100_z_const.RData"))$p_value
+pval_res_stock_application_x_SP500_y_HangSeng_z_const <- list.load(paste0(data_path, "res_stock_application_x_SP500_y_HangSeng_z_const.RData"))$p_value
+pval_res_stock_application_x_SP500_y_Nikkei225_z_const <- list.load(paste0(data_path, "res_stock_application_x_SP500_y_Nikkei225_z_const.RData"))$p_value
+pval_res_stock_application_x_FTSE100_y_HangSeng_z_const <- list.load(paste0(data_path, "res_stock_application_x_FTSE100_y_HangSeng_z_const.RData"))$p_value
+pval_res_stock_application_x_FTSE100_y_Nikkei225_z_const <- list.load(paste0(data_path, "res_stock_application_x_FTSE100_y_Nikkei225_z_const.RData"))$p_value
+pval_res_stock_application_x_HangSeng_y_Nikkei225_z_const <- list.load(paste0(data_path, "res_stock_application_x_HangSeng_y_Nikkei225_z_const.RData"))$p_value
+pval_res_stock_application_x_SP500_y_FTSE100_z_HangSeng <- list.load(paste0(data_path, "res_stock_application_x_SP500_y_FTSE100_z_HangSeng.RData"))$p_value
+pval_res_stock_application_x_SP500_y_FTSE100_z_Nikkei225 <- list.load(paste0(data_path, "res_stock_application_x_SP500_y_FTSE100_z_Nikkei225.RData"))$p_value
+pval_res_stock_application_x_SP500_y_HangSeng_z_FTSE100 <- list.load(paste0(data_path, "res_stock_application_x_SP500_y_HangSeng_z_FTSE100.RData"))$p_value
+pval_res_stock_application_x_SP500_y_HangSeng_z_Nikkei225 <- list.load(paste0(data_path, "res_stock_application_x_SP500_y_HangSeng_z_Nikkei225.RData"))$p_value
+pval_res_stock_application_x_SP500_y_Nikkei225_z_FTSE100 <- list.load(paste0(data_path, "res_stock_application_x_SP500_y_Nikkei225_z_FTSE100.RData"))$p_value
+pval_res_stock_application_x_SP500_y_Nikkei225_z_HangSeng <- list.load(paste0(data_path, "res_stock_application_x_SP500_y_Nikkei225_z_HangSeng.RData"))$p_value
+pval_res_stock_application_x_FTSE100_y_HangSeng_z_SP500 <- list.load(paste0(data_path, "res_stock_application_x_FTSE100_y_HangSeng_z_SP500.RData"))$p_value
+pval_res_stock_application_x_FTSE100_y_HangSeng_z_Nikkei225 <- list.load(paste0(data_path, "res_stock_application_x_FTSE100_y_HangSeng_z_Nikkei225.RData"))$p_value
+pval_res_stock_application_x_FTSE100_y_Nikkei225_z_SP500 <- list.load(paste0(data_path, "res_stock_application_x_FTSE100_y_Nikkei225_z_SP500.RData"))$p_value
+pval_res_stock_application_x_FTSE100_y_Nikkei225_z_HangSeng <- list.load(paste0(data_path, "res_stock_application_x_FTSE100_y_Nikkei225_z_HangSeng.RData"))$p_value
+pval_res_stock_application_x_HangSeng_y_Nikkei225_z_SP500 <- list.load(paste0(data_path, "res_stock_application_x_HangSeng_y_Nikkei225_z_SP500.RData"))$p_value
+pval_res_stock_application_x_HangSeng_y_Nikkei225_z_FTSE100 <- list.load(paste0(data_path, "res_stock_application_x_HangSeng_y_Nikkei225_z_FTSE100.RData"))$p_value
+pval_res_stock_application_x_FTSE100_y_Nikkei225_z_SP500_lag1 <- list.load(paste0(data_path, "res_stock_application_x_FTSE100_y_Nikkei225_z_SP500_lag1.RData"))$p_value
+pval_res_stock_application_x_FTSE100_y_HangSeng_z_SP500_lag1 <- list.load(paste0(data_path, "res_stock_application_x_FTSE100_y_HangSeng_z_SP500_lag1.RData"))$p_value
+pval_res_stock_application_x_Nikkei225_y_HangSeng_z_SP500_lag1 <- list.load(paste0(data_path, "res_stock_application_x_Nikkei225_y_HangSeng_z_SP500_lag1.RData"))$p_value
+pval_res_stock_application_x_FTSE100_y_SP500_lag1_z_const <- list.load(paste0(data_path, "res_stock_application_x_FTSE100_y_SP500_lag1_z_const.RData"))$p_value
+pval_res_stock_application_x_Nikkei225_y_SP500_lag1_z_const <- list.load(paste0(data_path, "res_stock_application_x_Nikkei225_y_SP500_lag1_z_const.RData"))$p_value
+pval_res_stock_application_x_HangSeng_y_SP500_lag1_z_const <- list.load(paste0(data_path, "res_stock_application_x_HangSeng_y_SP500_lag1_z_const.RData"))$p_value
+```
+
+
+```{r}
+xyz_names <- c(
+ "$\\texttt{S\\&P(t)} \\!\\perp \\!\\!\\! \\perp \\texttt{FTSE(t)} \\text{ for all times } t$",
+ "$\\texttt{S\\&P(t)} \\!\\perp \\!\\!\\! \\perp \\texttt{HangSeng(t)} \\text{ for all times } t$",
+ "$\\texttt{S\\&P(t)} \\!\\perp \\!\\!\\! \\perp \\texttt{Nikkei(t)} \\text{ for all times } t$",
+ "$\\texttt{FTSE(t)} \\!\\perp \\!\\!\\! \\perp \\texttt{HangSeng(t)} \\text{ for all times } t$",
+ "$\\texttt{FTSE(t)} \\!\\perp \\!\\!\\! \\perp \\texttt{Nikkei(t)} \\text{ for all times } t$",
+ "$\\texttt{HangSeng(t)} \\!\\perp \\!\\!\\! \\perp \\texttt{Nikkei(t)} \\text{ for all times } t$",
+ "$\\texttt{S\\&P(t)} \\!\\perp \\!\\!\\! \\perp \\texttt{FTSE(t)} \\mid \\texttt{HangSeng(t)} \\text{ for all times } t$",
+ "$\\texttt{S\\&P(t)} \\!\\perp \\!\\!\\! \\perp \\texttt{FTSE(t)} \\mid \\texttt{Nikkei(t)} \\text{ for all times } t$",
+ "$\\texttt{S\\&P(t)} \\!\\perp \\!\\!\\! \\perp \\texttt{HangSeng(t)} \\mid \\texttt{FTSE(t)} \\text{ for all times } t$",
+ "$\\texttt{S\\&P(t)} \\!\\perp \\!\\!\\! \\perp \\texttt{HangSeng(t)} \\mid \\texttt{Nikkei(t)} \\text{ for all times } t$",
+ "$\\texttt{S\\&P(t)} \\!\\perp \\!\\!\\! \\perp \\texttt{Nikkei(t)} \\mid \\texttt{FTSE(t)} \\text{ for all times } t$",
+ "$\\texttt{S\\&P(t)} \\!\\perp \\!\\!\\! \\perp \\texttt{Nikkei(t)} \\mid \\texttt{HangSeng(t)} \\text{ for all times } t$",
+ "$\\texttt{FTSE(t)} \\!\\perp \\!\\!\\! \\perp \\texttt{HangSeng(t)} \\mid \\texttt{S\\&P(t)} \\text{ for all times } t$",
+ "$\\texttt{FTSE(t)} \\!\\perp \\!\\!\\! \\perp \\texttt{HangSeng(t)} \\mid \\texttt{Nikkei(t)} \\text{ for all times } t$",
+ "$\\texttt{FTSE(t)} \\!\\perp \\!\\!\\! \\perp \\texttt{Nikkei(t)} \\mid \\texttt{S\\&P(t)} \\text{ for all times } t$",
+ "$\\texttt{FTSE(t)} \\!\\perp \\!\\!\\! \\perp \\texttt{Nikkei(t)} \\mid \\texttt{HangSeng(t)} \\text{ for all times } t$",
+ "$\\texttt{HangSeng(t)} \\!\\perp \\!\\!\\! \\perp \\texttt{Nikkei(t)} \\mid \\texttt{S\\&P(t)} \\text{ for all times } t$",
+ "$\\texttt{HangSeng(t)} \\!\\perp \\!\\!\\! \\perp \\texttt{Nikkei(t)} \\mid \\texttt{FTSE(t)} \\text{ for all times } t$",
+ "$\\texttt{FTSE(t)} \\!\\perp \\!\\!\\! \\perp \\texttt{Nikkei(t)} \\mid \\texttt{S\\&P(t-1)} \\text{ for all times } t$",
+ "$\\texttt{FTSE(t)} \\!\\perp \\!\\!\\! \\perp \\texttt{HangSeng(t)} \\mid \\texttt{S\\&P(t-1)} \\text{ for all times } t$",
+ "$\\texttt{Nikkei(t)} \\!\\perp \\!\\!\\! \\perp \\texttt{HangSeng(t)} \\mid \\texttt{S\\&P(t-1)} \\text{ for all times } t$",
+ "$\\texttt{FTSE(t)} \\!\\perp \\!\\!\\! \\perp \\texttt{S\\&P(t-1)} \\text{ for all times } t$",
+ "$\\texttt{Nikkei(t)} \\!\\perp \\!\\!\\! \\perp \\texttt{S\\&P(t-1)} \\text{ for all times } t$",
+ "$\\texttt{HangSeng(t)} \\!\\perp \\!\\!\\! \\perp \\texttt{S\\&P(t-1)} \\text{ for all times } t$"
+)
+
+pvalues <- c(
+  pval_res_stock_application_x_SP500_y_FTSE100_z_const,
+  pval_res_stock_application_x_SP500_y_HangSeng_z_const,
+  pval_res_stock_application_x_SP500_y_Nikkei225_z_const,
+  pval_res_stock_application_x_FTSE100_y_HangSeng_z_const,
+  pval_res_stock_application_x_FTSE100_y_Nikkei225_z_const,
+  pval_res_stock_application_x_HangSeng_y_Nikkei225_z_const,
+  pval_res_stock_application_x_SP500_y_FTSE100_z_HangSeng,
+  pval_res_stock_application_x_SP500_y_FTSE100_z_Nikkei225,
+  pval_res_stock_application_x_SP500_y_HangSeng_z_FTSE100,
+  pval_res_stock_application_x_SP500_y_HangSeng_z_Nikkei225,
+  pval_res_stock_application_x_SP500_y_Nikkei225_z_FTSE100,
+  pval_res_stock_application_x_SP500_y_Nikkei225_z_HangSeng,
+  pval_res_stock_application_x_FTSE100_y_HangSeng_z_SP500,
+  pval_res_stock_application_x_FTSE100_y_HangSeng_z_Nikkei225,
+  pval_res_stock_application_x_FTSE100_y_Nikkei225_z_SP500,
+  pval_res_stock_application_x_FTSE100_y_Nikkei225_z_HangSeng,
+  pval_res_stock_application_x_HangSeng_y_Nikkei225_z_SP500,
+  pval_res_stock_application_x_HangSeng_y_Nikkei225_z_FTSE100,
+  pval_res_stock_application_x_FTSE100_y_Nikkei225_z_SP500_lag1,
+  pval_res_stock_application_x_FTSE100_y_HangSeng_z_SP500_lag1,
+  pval_res_stock_application_x_Nikkei225_y_HangSeng_z_SP500_lag1,
+  pval_res_stock_application_x_FTSE100_y_SP500_lag1_z_const,
+  pval_res_stock_application_x_Nikkei225_y_SP500_lag1_z_const,
+  pval_res_stock_application_x_HangSeng_y_SP500_lag1_z_const)
+pvalues
+
+adj_pvalues <- p.adjust(pvalues, method = "BH")
+adj_pvalues
+
+pval_df <- data.frame(xyz_name = xyz_names, 
+                      pvalue = pvalues, 
+                      adj_pvalue = adj_pvalues)
+colnames(pval_df) <- c("Null Hypothesis", "P-value", "Adjusted P-value")
+
+
+pval_df <- pval_df %>% mutate(across(where(is.numeric), ~paste0("\\num{", ., "}")))
+
+saveRDS(pval_df, paste0(data_path,"pval_df.rds"))
+read_pval_df <- readRDS(paste0(data_path,"pval_df.rds"))
+
+kable(read_pval_df, format = "latex", booktabs = TRUE, escape = FALSE)
+
+### to format the table 
+# copy this output and paste into Overleaf
+# \textbf{} column names
+# remove \addlinespace
+# change e.g. \num{2e-4} to \SI{2e-4}{}
+```
+
+```{r}
+View(read_pval_df)
+```
