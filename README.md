@@ -1,5 +1,5 @@
-dGCM_test.R
-- Code for the test.
+- **`dGCM_test.R`**
+  Code for the test.
 
 generate_add_effect_realizations.R
 - Code to generate the time series for the additive effect simulations for the conditional independence test.
