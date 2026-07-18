@@ -5,4 +5,4 @@
 - **`sieve.R`** - Implements sieve estimator for the time-varying regression functions
 
 ## Links
-- Paper: https://arxiv.org/pdf/2504.21647 
+- [dGCM paper](https://arxiv.org/pdf/2504.21647)
