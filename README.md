@@ -4,5 +4,5 @@
 
 - **`sieve.R`** - Implements sieve estimator for the time-varying regression functions
 
-## Links
-- [dGCM paper](https://arxiv.org/pdf/2504.21647)
+## Papers
+- [Conditional independence testing with a single realization of a multivariate nonstationary nonlinear time series](https://arxiv.org/pdf/2504.21647)
