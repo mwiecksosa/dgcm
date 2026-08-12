@@ -5,4 +5,4 @@
 - **`sieve.R`** - Implements sieve estimator for the time-varying regression functions
 
 ## Papers
-- [Conditional independence testing with a single realization of a multivariate nonstationary nonlinear time series](https://arxiv.org/pdf/2504.21647)
+- [The dynamic generalized covariance measure for conditional independence testing with nonstationary time series](https://arxiv.org/pdf/2504.21647)
